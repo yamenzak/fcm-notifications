@@ -22,6 +22,7 @@ export default defineHook(({ action }, { services }) => {
 			const targetRecipients = Array.isArray(recipient) ? recipient : [recipient];
 			const tRes = await tService.readByQuery({ filter: { user: { _in: targetRecipients } } });
 			const tokens = tRes.map((t: any) => t.token);
+			console.log(`FCM Hook: Sending to ${tokens.length} tokens for user ${recipient}`);
 			
 			if (tokens.length === 0) return;
 
@@ -29,14 +30,13 @@ export default defineHook(({ action }, { services }) => {
 			for (const fcmToken of tokens) {
 				fetch(fcmUrl, {
 					method: 'POST',
-					headers: { 
-						'Authorization': `Bearer ${token.token}`, 
-						'Content-Type': 'application/json' 
-					},
+					headers: { 'Authorization': `Bearer ${token.token}`, 'Content-Type': 'application/json' },
 					body: JSON.stringify({ 
 						message: { 
 							token: fcmToken, 
-							notification: { 
+							// We move the content to 'data' and OMIT 'notification' 
+							// to prevent the browser/OS from double-showing it.
+							data: { 
 								title: subject || 'New Notification', 
 								body: message || 'You have a new message' 
 							} 

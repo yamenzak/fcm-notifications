@@ -14,10 +14,7 @@ async function getFirebaseCode() {
 		const messCode = await messRes.text();
 		cachedFirebaseCode = appCode + '\n' + messCode;
 		return cachedFirebaseCode;
-	} catch (e) {
-		console.error('FCM: Failed to fetch Firebase code:', e);
-		return '';
-	}
+	} catch (e) { return ''; }
 }
 
 async function ensureField(fs: any, collection: string, field: string, payload: any) {
@@ -39,26 +36,26 @@ async function runSetup(services: any, schema: any) {
 			await cs.createOne({ collection: 'fcm_tokens', meta: { icon: 'devices' }, schema: {} });
 		});
 
-		await ensureField(fs, 'fcm_config', 'firebase_config', { type: 'json', meta: { interface: 'input-code', options: { language: 'json' } } });
-		await ensureField(fs, 'fcm_config', 'service_account', { type: 'json', meta: { interface: 'input-code', options: { language: 'json' } } });
-		await ensureField(fs, 'fcm_config', 'vapid_key', { type: 'string', meta: { interface: 'input' } });
+		const ensureFieldLocal = async (col: string, field: string, payload: any) => {
+			try { await fs.readOne(col, field); } catch (e) { await fs.createField(col, { field, ...payload }); }
+		};
 
-		await ensureField(fs, 'fcm_tokens', 'user', { type: 'uuid', meta: { interface: 'select-dropdown-m2o' }, schema: { foreign_key_table: 'directus_users', foreign_key_column: 'id' } });
-		await ensureField(fs, 'fcm_tokens', 'token', { type: 'string', meta: { interface: 'input' } });
-		await ensureField(fs, 'fcm_tokens', 'device_name', { type: 'string', meta: { interface: 'input' } });
+		await ensureFieldLocal('fcm_config', 'firebase_config', { type: 'json', meta: { interface: 'input-code', options: { language: 'json' } } });
+		await ensureFieldLocal('fcm_config', 'service_account', { type: 'json', meta: { interface: 'input-code', options: { language: 'json' } } });
+		await ensureFieldLocal('fcm_config', 'vapid_key', { type: 'string', meta: { interface: 'input' } });
+		await ensureFieldLocal('fcm_tokens', 'user', { type: 'uuid', meta: { interface: 'select-dropdown-m2o' }, schema: { foreign_key_table: 'directus_users', foreign_key_column: 'id' } });
+		await ensureFieldLocal('fcm_tokens', 'token', { type: 'string', meta: { interface: 'input' } });
+		await ensureFieldLocal('fcm_tokens', 'device_name', { type: 'string', meta: { interface: 'input' } });
 
-		// Ensure relation
 		try { await rs.readOne('fcm_tokens', 'user'); } catch (e) {
 			await rs.createOne({ collection: 'fcm_tokens', field: 'user', related_collection: 'directus_users', schema: { foreign_key_table: 'directus_users', foreign_key_column: 'id' } });
 		}
-
 		isSetup = true;
-	} catch (e) { console.error('FCM Setup Error:', e); }
+	} catch (e) {}
 }
 
 export default defineEndpoint((router, { services, exceptions }) => {
 	const { ItemsService } = services;
-
 	router.post('/register', async (req, res, next) => {
 		try {
 			await runSetup(services, req.schema);
@@ -77,7 +74,26 @@ export default defineEndpoint((router, { services, exceptions }) => {
 			const configService = new ItemsService('fcm_config', { schema: req.schema, accountability: { admin: true } });
 			const config = await configService.readSingleton({});
 			const firebaseLibCode = await getFirebaseCode();
-			const swCode = `${firebaseLibCode}\nfirebase.initializeApp(${JSON.stringify(config.firebase_config)});const messaging = firebase.messaging();messaging.onBackgroundMessage((p) => { self.registration.showNotification(p.notification.title || 'New Notification', { body: p.notification.body || 'You have a new message', icon: '/assets/logo.png' }); });`;
+			
+			const swCode = `
+${firebaseLibCode}
+firebase.initializeApp(${JSON.stringify(config.firebase_config)});
+const messaging = firebase.messaging();
+
+messaging.onBackgroundMessage((payload) => {
+  console.log('[SW] Received background data message', payload);
+  
+  // We strictly use the 'data' block now to prevent double-showing
+  const title = payload.data?.title || 'New Notification';
+  const options = {
+    body: payload.data?.body || 'You have a new message from Directus',
+    icon: '/assets/logo.png',
+    tag: 'directus-notification', // Unique tag to prevent duplicate popups for same message
+    renotify: true
+  };
+  
+  self.registration.showNotification(title, options);
+});`;
 			res.setHeader('Content-Type', 'application/javascript');
 			return res.send(swCode);
 		} catch (error) { return next(error); }

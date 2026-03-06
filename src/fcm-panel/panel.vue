@@ -5,7 +5,7 @@
 		
 		<div v-if="checking" class="checking">
 			<v-progress-circular indeterminate />
-			<p>Checking subscription status...</p>
+			<p>Checking status...</p>
 		</div>
 
 		<div v-else-if="!status && !error">
@@ -49,7 +49,7 @@ const getFirebase = async () => {
 const checkSubscription = async () => {
 	try {
 		if (Notification.permission !== 'granted') {
-			subscribed.ref = false;
+			subscribed.value = false;
 			return;
 		}
 
@@ -66,11 +66,8 @@ const checkSubscription = async () => {
 
 		if (token) {
 			currentToken = token;
-			// Verify with Directus API
 			const res = await api.get('/items/fcm_tokens', {
-				params: {
-					filter: { token: { _eq: token } }
-				}
+				params: { filter: { token: { _eq: token } } }
 			});
 			subscribed.value = res.data.data.length > 0;
 		}
@@ -119,20 +116,31 @@ const unsubscribe = async () => {
 		const { firebase } = await getFirebase();
 		const messaging = getMessaging(firebase);
 		
-		// 1. Delete from Directus
-		await api.delete('/items/fcm_tokens', {
-			params: {
-				filter: { token: { _eq: currentToken } }
-			}
+		// 1. Find and Delete from Directus
+		const searchRes = await api.get('/items/fcm_tokens', {
+			params: { filter: { token: { _eq: currentToken } }, fields: ['id'] }
 		});
+
+		const item = searchRes.data.data[0];
+		if (item) {
+			await api.delete(`/items/fcm_tokens/${item.id}`);
+		}
 
 		// 2. Delete from Firebase
 		await deleteToken(messaging);
+
+		// 3. Unregister the Service Worker
+		const registration = await navigator.serviceWorker.getRegistration('/fcm/');
+		if (registration) {
+			await registration.unregister();
+			console.log('FCM: Service Worker unregistered.');
+		}
 		
 		subscribed.value = false;
-		status.value = 'Unsubscribed successfully.';
+		status.value = 'Unsubscribed and worker removed.';
 	} catch (err: any) {
-		error.value = 'Failed to unsubscribe.';
+		console.error('Unsubscribe Error:', err);
+		error.value = 'Failed to fully unsubscribe.';
 	} finally {
 		loading.value = false;
 	}
@@ -153,13 +161,8 @@ onMounted(() => {
 	align-items: center;
 	height: 100%;
 }
-.panel-icon {
-	margin-bottom: 16px;
-	color: var(--foreground-subdued);
-}
-.panel-icon.active {
-	color: var(--primary);
-}
+.panel-icon { margin-bottom: 16px; color: var(--foreground-subdued); }
+.panel-icon.active { color: var(--primary); }
 .mb-4 { margin-bottom: 16px; }
 .checking { color: var(--foreground-subdued); }
 h3 { margin-bottom: 8px; }
