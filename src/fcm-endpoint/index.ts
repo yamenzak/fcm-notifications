@@ -20,28 +20,20 @@ async function getFirebaseCode(): Promise<string> {
 			fetch('https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js'),
 			fetch('https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging-compat.js')
 		]);
-		const appCode = await appRes.text();
-		const messCode = await messRes.text();
-		cachedFirebaseCode = appCode + '\n' + messCode;
+		cachedFirebaseCode = (await appRes.text()) + '\n' + (await messRes.text());
 		return cachedFirebaseCode;
-	} catch (error) {
-		console.error('FCM: Failed to fetch Firebase code:', error);
-		return '';
-	}
+	} catch (error) { return ''; }
 }
 
 async function getImageAsBase64(url: string | undefined): Promise<string> {
 	if (!url || !url.startsWith('http')) return url || 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 	try {
 		const res = await fetch(url, { signal: (AbortSignal as any).timeout(5000) });
-		if (!res.ok) throw new Error(`HTTP ${res.status}`);
 		const arrayBuffer = await res.arrayBuffer();
 		const buffer = Buffer.from(arrayBuffer);
 		const contentType = res.headers.get('content-type') || 'image/png';
 		return `data:${contentType};base64,${buffer.toString('base64')}`;
-	} catch (error) {
-		return 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'; 
-	}
+	} catch (error) { return 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'; }
 }
 
 async function runSetup(services: any, schema: any): Promise<void> {
@@ -50,16 +42,13 @@ async function runSetup(services: any, schema: any): Promise<void> {
 	const cs = new CollectionsService({ schema, accountability: { admin: true } as any });
 	const fs = new FieldsService({ schema, accountability: { admin: true } as any });
 	const rs = new RelationsService({ schema, accountability: { admin: true } as any });
-
 	try {
 		await cs.readOne('fcm_config').catch(async () => {
 			await cs.createOne({ collection: 'fcm_config', singleton: true, meta: { icon: 'notifications_active', display_name: 'FCM Settings' }, schema: {} });
 		});
-		
 		const ensureField = async (col: string, field: string, payload: any) => {
 			try { await fs.readOne(col, field); } catch (e) { await fs.createField(col, { field, ...payload }); }
 		};
-
 		await ensureField('fcm_config', 'firebase_config', { type: 'json', meta: { interface: 'input-code', options: { language: 'json' } } });
 		await ensureField('fcm_config', 'service_account', { type: 'json', meta: { interface: 'input-code', options: { language: 'json' } } });
 		await ensureField('fcm_config', 'vapid_key', { type: 'string', meta: { interface: 'input' } });
@@ -67,31 +56,50 @@ async function runSetup(services: any, schema: any): Promise<void> {
 		await ensureField('fcm_config', 'notification_tag', { type: 'string', meta: { interface: 'input' } });
 		await ensureField('fcm_config', 'group_notifications', { type: 'boolean', meta: { interface: 'boolean', width: 'half' }, schema: { default_value: true } });
 		await ensureField('fcm_config', 'group_by_collection', { type: 'boolean', meta: { interface: 'boolean', width: 'half' }, schema: { default_value: true } });
-
 		await ensureField('fcm_tokens', 'user', { type: 'uuid', meta: { interface: 'select-dropdown-m2o' }, schema: { foreign_key_table: 'directus_users', foreign_key_column: 'id' } });
 		await ensureField('fcm_tokens', 'token', { type: 'string', meta: { interface: 'input' } });
 		await ensureField('fcm_tokens', 'device_name', { type: 'string', meta: { interface: 'input' } });
-
 		try { await rs.readOne('fcm_tokens', 'user'); } catch (e) {
 			await rs.createOne({ collection: 'fcm_tokens', field: 'user', related_collection: 'directus_users', schema: { foreign_key_table: 'directus_users', foreign_key_column: 'id' } });
 		}
 		isSetup = true;
-	} catch (error) {
-		console.error('FCM Setup Error:', error);
-	}
+	} catch (e) {}
 }
 
 export default defineEndpoint((router, { services, exceptions }: any) => {
 	const { ItemsService } = services;
 	
-	router.post('/register', async (req: any, res, next) => {
+	// NEW: Safe Config Fetcher (Public parts only)
+	router.get('/config', async (req: any, res, next) => {
 		try {
 			await runSetup(services, req.schema);
+			const configService = new ItemsService('fcm_config', { schema: req.schema, accountability: { admin: true } as any });
+			const config = await configService.readSingleton({}) as FCMConfig;
+			return res.json({
+				firebase_config: config.firebase_config,
+				vapid_key: config.vapid_key
+			});
+		} catch (error) { return next(error); }
+	});
+
+	router.post('/register', async (req: any, res, next) => {
+		try {
 			if (!req.accountability?.user) throw new exceptions.AuthenticationException();
 			const { token, device_name } = req.body;
-			const tokenService = new ItemsService('fcm_tokens', { schema: req.schema, accountability: req.accountability });
+			const tokenService = new ItemsService('fcm_tokens', { schema: req.schema, accountability: { admin: true } as any });
 			const existing = await tokenService.readByQuery({ filter: { _and: [{ user: { _eq: req.accountability.user } }, { token: { _eq: token } }] } });
 			if (existing.length === 0) await tokenService.createOne({ user: req.accountability.user, token, device_name: device_name || 'Web Browser' });
+			return res.json({ success: true });
+		} catch (error) { return next(error); }
+	});
+
+	// NEW: Unregister via Endpoint
+	router.post('/unregister', async (req: any, res, next) => {
+		try {
+			if (!req.accountability?.user) throw new exceptions.AuthenticationException();
+			const { token } = req.body;
+			const tokenService = new ItemsService('fcm_tokens', { schema: req.schema, accountability: { admin: true } as any });
+			await tokenService.deleteByQuery({ filter: { _and: [{ user: { _eq: req.accountability.user } }, { token: { _eq: token } }] } });
 			return res.json({ success: true });
 		} catch (error) { return next(error); }
 	});

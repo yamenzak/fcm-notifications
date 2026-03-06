@@ -1,8 +1,13 @@
 {
 	"name": "directus-extension-fcm-notify",
-	"description": "FCM Notifications Extension for Directus",
-	"icon": "extension",
+	"description": "Send Firebase Cloud Messages (FCM) to users via system notifications.",
+	"icon": "notifications_active",
 	"version": "1.0.0",
+	"keywords": [
+		"directus",
+		"directus-extension",
+		"directus-extension-bundle"
+	],
 	"type": "module",
 	"files": [
 		"dist"
@@ -29,6 +34,14 @@
 				"type": "panel",
 				"name": "fcm_notif_panel",
 				"source": "src/fcm-panel/index.ts"
+			},
+			{
+				"type": "operation",
+				"name": "fcm-broadcast",
+				"source": {
+					"app": "src/fcm-broadcast/app.ts",
+					"api": "src/fcm-broadcast/api.ts"
+				}
 			}
 		],
 		"host": "^10.10.0"

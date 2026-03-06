@@ -9,7 +9,6 @@
 		</div>
 
 		<div v-else-if="!status && !error">
-			<!-- Case 1: iOS but not added to Home Screen -->
 			<div v-if="isIOS && !isStandalone" class="ios-prompt">
 				<v-icon name="ios_share" size="large" class="panel-icon warning" />
 				<h3>Action Required</h3>
@@ -17,7 +16,6 @@
 				<v-info type="warning" icon="info">iOS only supports notifications when saved as an App.</v-info>
 			</div>
 
-			<!-- Case 2: Standard Flow -->
 			<div v-else>
 				<v-icon name="notifications" size="large" class="panel-icon" :class="{ active: subscribed }" />
 				<h3>{{ subscribed ? 'Notifications Enabled' : 'Push Notifications' }}</h3>
@@ -54,16 +52,8 @@ const status = ref('');
 const error = ref('');
 let currentToken = '';
 
-// OS Detection Logic
 const isIOS = computed(() => {
-	return [
-		'iPad Simulator',
-		'iPhone Simulator',
-		'iPod Simulator',
-		'iPad',
-		'iPhone',
-		'iPod'
-	].includes(navigator.platform) || (navigator.userAgent.includes("Mac") && "ontouchend" in document);
+	return ['iPad Simulator','iPhone Simulator','iPod Simulator','iPad','iPhone','iPod'].includes(navigator.platform) || (navigator.userAgent.includes("Mac") && "ontouchend" in document);
 });
 
 const isStandalone = computed(() => {
@@ -71,8 +61,8 @@ const isStandalone = computed(() => {
 });
 
 const getFirebase = async (): Promise<{ app: FirebaseApp; vapidKey: string }> => {
-	const res = await api.get('/items/fcm_config');
-	const config = res.data.data as FCMConfig;
+	const res = await api.get('/fcm/config');
+	const config = res.data as FCMConfig;
 	if (!config?.firebase_config) throw new Error('Firebase configuration missing.');
 	const app = !getApps().length ? initializeApp(config.firebase_config) : getApp();
 	return { app, vapidKey: config.vapid_key };
@@ -80,12 +70,6 @@ const getFirebase = async (): Promise<{ app: FirebaseApp; vapidKey: string }> =>
 
 const checkSubscription = async () => {
 	try {
-		// Only run cleanup and checks if the environment supports it
-		if (isIOS.value && !isStandalone.value) {
-			checking.value = false;
-			return;
-		}
-
 		const registrations = await navigator.serviceWorker.getRegistrations();
 		for (let reg of registrations) {
 			if (reg.scope.includes('/fcm/') && !reg.active?.scriptURL.includes('d1r3ctu5fcm.js')) {
@@ -93,35 +77,22 @@ const checkSubscription = async () => {
 			}
 		}
 
-		if (typeof Notification === 'undefined' || Notification.permission !== 'granted') {
-			subscribed.value = false;
-			checking.value = false;
-			return;
-		}
+		if (isIOS.value && !isStandalone.value) return;
+		if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
 
 		const registration = await navigator.serviceWorker.getRegistration('/fcm/');
-		if (!registration) {
-			checking.value = false;
-			return;
-		}
+		if (!registration) return;
 
 		const { app, vapidKey } = await getFirebase();
 		const messaging: Messaging = getMessaging(app);
-		
-		const token = await getToken(messaging, { 
-			vapidKey, 
-			serviceWorkerRegistration: registration 
-		});
+		const token = await getToken(messaging, { vapidKey, serviceWorkerRegistration: registration });
 
 		if (token) {
 			currentToken = token;
-			const res = await api.get('/items/fcm_tokens', {
-				params: { filter: { token: { _eq: token } } }
-			});
-			subscribed.value = res.data.data.length > 0;
+			const res = await api.post('/fcm/register', { token, device_name: 'Checking...' });
+			subscribed.value = res.data.success;
 		}
 	} catch (err) {
-		// Silent fail on load
 	} finally {
 		checking.value = false;
 	}
@@ -133,33 +104,23 @@ const requestPermission = async () => {
 	try {
 		const { app, vapidKey } = await getFirebase();
 		const messaging: Messaging = getMessaging(app);
-
-		if (typeof Notification === 'undefined') {
-			throw new Error('Notifications are not supported on this browser.');
-		}
+		if (typeof Notification === 'undefined') throw new Error('Not supported.');
 
 		const permission = await Notification.requestPermission();
 		if (permission !== 'granted') throw new Error('Permission denied.');
 
 		const registration = await navigator.serviceWorker.register('/fcm/d1r3ctu5fcm.js', { scope: '/fcm/' });
-		const token = await getToken(messaging, { 
-			vapidKey, 
-			serviceWorkerRegistration: registration 
-		});
+		const token = await getToken(messaging, { vapidKey, serviceWorkerRegistration: registration });
+		if (!token) throw new Error('Failed.');
 
-		if (!token) throw new Error('Token retrieval failed.');
-
-		await api.post('/fcm/register', { 
-			token, 
-			device_name: navigator.userAgent.split(') ')[0].split(' (')[1] || 'Web Browser' 
-		});
+		await api.post('/fcm/register', { token, device_name: navigator.userAgent.split(') ')[0].split(' (')[1] || 'Web' });
 		
 		currentToken = token;
 		subscribed.value = true;
-		status.value = 'Notifications enabled!';
+		status.value = 'Enabled!';
 		setTimeout(() => status.value = '', 3000);
 	} catch (err: any) {
-		error.value = err.message || 'Error occurred.';
+		error.value = err.message || 'Error.';
 		setTimeout(() => error.value = '', 5000);
 	} finally {
 		loading.value = false;
@@ -171,49 +132,28 @@ const unsubscribe = async () => {
 	try {
 		const { app } = await getFirebase();
 		const messaging: Messaging = getMessaging(app);
-		
-		const searchRes = await api.get('/items/fcm_tokens', {
-			params: { filter: { token: { _eq: currentToken } }, fields: ['id'] }
-		});
-		const item = searchRes.data.data[0];
-		if (item) await api.delete(`/items/fcm_tokens/${item.id}`);
-
+		await api.post('/fcm/unregister', { token: currentToken });
 		try { await deleteToken(messaging); } catch (e) {}
-
 		const registrations = await navigator.serviceWorker.getRegistrations();
 		for (let reg of registrations) {
-			if (reg.scope.includes('/fcm/')) {
-				await reg.unregister();
-			}
+			if (reg.scope.includes('/fcm/')) await reg.unregister();
 		}
-		
 		subscribed.value = false;
-		status.value = 'Unsubscribed successfully.';
+		status.value = 'Unsubscribed.';
 		setTimeout(() => status.value = '', 3000);
 	} catch (err: any) {
-		console.error('Unsubscribe Error:', err);
-		error.value = 'Failed to unsubscribe.';
+		error.value = 'Failed.';
 		setTimeout(() => error.value = '', 5000);
 	} finally {
 		loading.value = false;
 	}
 };
 
-onMounted(() => {
-	checkSubscription();
-});
+onMounted(() => { checkSubscription(); });
 </script>
 
 <style scoped>
-.fcm-panel-container { 
-	padding: 32px; 
-	text-align: center; 
-	display: flex;
-	flex-direction: column;
-	justify-content: center;
-	align-items: center;
-	height: 100%;
-}
+.fcm-panel-container { padding: 32px; text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100%; }
 .panel-icon { margin-bottom: 16px; color: var(--foreground-subdued); transition: color 0.3s ease; }
 .panel-icon.active { color: var(--primary); }
 .panel-icon.warning { color: var(--warning); }
@@ -221,5 +161,4 @@ onMounted(() => {
 .checking { color: var(--foreground-subdued); }
 h3 { margin-bottom: 8px; }
 p { margin-bottom: 24px; color: var(--foreground-subdued); max-width: 300px; }
-.ios-prompt strong { color: var(--foreground-normal); }
 </style>
