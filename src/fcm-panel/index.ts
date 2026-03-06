@@ -2,12 +2,12 @@ import { definePanel } from '@directus/extensions-sdk';
 import PanelComponent from './panel.vue';
 
 export default definePanel({
-	id: 'fcm-panel',
+	id: 'fcm_notif_panel',
 	name: 'FCM Notifications',
 	icon: 'notifications',
-	description: 'Allow users to enable push notifications on this device.',
+	description: 'FCM Push Setup',
 	component: PanelComponent,
 	options: [],
-	minWidth: 12,
-	minHeight: 8,
+	minWidth: 16,
+	minHeight: 16,
 });

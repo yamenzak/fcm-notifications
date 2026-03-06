@@ -27,7 +27,7 @@
 			},
 			{
 				"type": "panel",
-				"name": "fcm-panel",
+				"name": "fcm_notif_panel",
 				"source": "src/fcm-panel/index.ts"
 			}
 		],
@@ -39,8 +39,10 @@
 	},
 	"devDependencies": {
 		"@directus/extensions-sdk": "17.0.10",
-		"typescript": "^5.0.0",
-		"firebase": "^12.10.0",
-		"google-auth-library": "^9.15.0"
+		"typescript": "^5.0.0"
+	},
+	"dependencies": {
+		"firebase": "latest",
+		"google-auth-library": "latest"
 	}
 }

@@ -1,18 +1,15 @@
-import { defineHook } from '@directus/extensions-sdk';
+import { defineOperationApi } from '@directus/extensions-sdk';
 import { GoogleAuth } from 'google-auth-library';
 
-export default defineHook(({ action }, { services }) => {
-	const { ItemsService } = services;
-
-	action('notifications.create', async (p, { schema }) => {
-		console.log('FCM Hook: Processing notification...');
-		const { recipient, subject, message } = p.payload;
-		
+export default defineOperationApi({
+	id: 'fcm-broadcast',
+	handler: async ({ recipient, subject, message }, { services, schema }) => {
+		const { ItemsService } = services;
 		try {
 			const configService = new ItemsService('fcm_config', { schema, accountability: { admin: true } });
 			const config = await configService.readSingleton({});
 			const sa = config?.service_account;
-			if (!sa?.project_id) return;
+			if (!sa?.project_id) throw new Error('Service account missing.');
 
 			const auth = new GoogleAuth({ credentials: sa, scopes: 'https://www.googleapis.com/auth/firebase.messaging' });
 			const client = await auth.getClient();
@@ -23,27 +20,22 @@ export default defineHook(({ action }, { services }) => {
 			const tRes = await tService.readByQuery({ filter: { user: { _in: targetRecipients } } });
 			const tokens = tRes.map((t: any) => t.token);
 			
-			if (tokens.length === 0) return;
+			if (tokens.length === 0) return { success: true, sent: 0 };
 
 			const fcmUrl = `https://fcm.googleapis.com/v1/projects/${sa.project_id}/messages:send`;
+			let successCount = 0;
+
 			for (const fcmToken of tokens) {
-				fetch(fcmUrl, {
+				const res = await fetch(fcmUrl, {
 					method: 'POST',
-					headers: { 
-						'Authorization': `Bearer ${token.token}`, 
-						'Content-Type': 'application/json' 
-					},
-					body: JSON.stringify({ 
-						message: { 
-							token: fcmToken, 
-							notification: { 
-								title: subject || 'New Notification', 
-								body: message || 'You have a new message' 
-							} 
-						} 
-					}),
+					headers: { 'Authorization': `Bearer ${token.token}`, 'Content-Type': 'application/json' },
+					body: JSON.stringify({ message: { token: fcmToken, notification: { title: subject || 'New Notification', body: message || 'You have a new message' } } }),
 				});
+				if (res.ok) successCount++;
 			}
-		} catch (e) { console.error('FCM Hook Error:', e); }
-	});
+			return { success: true, sent: successCount };
+		} catch (e: any) {
+			return { success: false, error: e.message };
+		}
+	},
 });
