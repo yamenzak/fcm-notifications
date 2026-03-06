@@ -48,6 +48,15 @@ const getFirebase = async () => {
 
 const checkSubscription = async () => {
 	try {
+		// Clean up ghost workers from old versions on every load
+		const registrations = await navigator.serviceWorker.getRegistrations();
+		for (let reg of registrations) {
+			if (reg.scope.includes('/fcm/') && !reg.active?.scriptURL.includes('d1r3ctu5fcm.js')) {
+				console.log('FCM: Cleaning up legacy worker:', reg.active?.scriptURL);
+				await reg.unregister();
+			}
+		}
+
 		if (Notification.permission !== 'granted') {
 			subscribed.value = false;
 			return;
@@ -88,7 +97,7 @@ const requestPermission = async () => {
 		const permission = await Notification.requestPermission();
 		if (permission !== 'granted') throw new Error('Permission denied.');
 
-		const registration = await navigator.serviceWorker.register('/fcm/sw.js', { scope: '/fcm/' });
+		const registration = await navigator.serviceWorker.register('/fcm/d1r3ctu5fcm.js', { scope: '/fcm/' });
 		const token = await getToken(messaging, { 
 			vapidKey, 
 			serviceWorkerRegistration: registration 
@@ -101,10 +110,13 @@ const requestPermission = async () => {
 			device_name: navigator.userAgent.split(') ')[0].split(' (')[1] || 'Web Browser' 
 		});
 		
+		currentToken = token;
 		subscribed.value = true;
 		status.value = 'Notifications enabled!';
+		setTimeout(() => status.value = '', 3000);
 	} catch (err: any) {
 		error.value = err.message || 'Error occurred.';
+		setTimeout(() => error.value = '', 5000);
 	} finally {
 		loading.value = false;
 	}
@@ -116,31 +128,28 @@ const unsubscribe = async () => {
 		const { firebase } = await getFirebase();
 		const messaging = getMessaging(firebase);
 		
-		// 1. Find and Delete from Directus
 		const searchRes = await api.get('/items/fcm_tokens', {
 			params: { filter: { token: { _eq: currentToken } }, fields: ['id'] }
 		});
-
 		const item = searchRes.data.data[0];
-		if (item) {
-			await api.delete(`/items/fcm_tokens/${item.id}`);
-		}
+		if (item) await api.delete(`/items/fcm_tokens/${item.id}`);
 
-		// 2. Delete from Firebase
-		await deleteToken(messaging);
+		try { await deleteToken(messaging); } catch (e) {}
 
-		// 3. Unregister the Service Worker
-		const registration = await navigator.serviceWorker.getRegistration('/fcm/');
-		if (registration) {
-			await registration.unregister();
-			console.log('FCM: Service Worker unregistered.');
+		const registrations = await navigator.serviceWorker.getRegistrations();
+		for (let reg of registrations) {
+			if (reg.scope.includes('/fcm/')) {
+				await reg.unregister();
+			}
 		}
 		
 		subscribed.value = false;
-		status.value = 'Unsubscribed and worker removed.';
+		status.value = 'Unsubscribed successfully.';
+		setTimeout(() => status.value = '', 3000);
 	} catch (err: any) {
 		console.error('Unsubscribe Error:', err);
-		error.value = 'Failed to fully unsubscribe.';
+		error.value = 'Failed to unsubscribe.';
+		setTimeout(() => error.value = '', 5000);
 	} finally {
 		loading.value = false;
 	}
@@ -161,7 +170,7 @@ onMounted(() => {
 	align-items: center;
 	height: 100%;
 }
-.panel-icon { margin-bottom: 16px; color: var(--foreground-subdued); }
+.panel-icon { margin-bottom: 16px; color: var(--foreground-subdued); transition: color 0.3s ease; }
 .panel-icon.active { color: var(--primary); }
 .mb-4 { margin-bottom: 16px; }
 .checking { color: var(--foreground-subdued); }

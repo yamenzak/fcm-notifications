@@ -5,8 +5,7 @@ export default defineHook(({ action }, { services }) => {
 	const { ItemsService } = services;
 
 	action('notifications.create', async (p, { schema }) => {
-		console.log('FCM Hook: Processing notification...');
-		const { recipient, subject, message } = p.payload;
+		const { recipient, subject, message, collection } = p.payload;
 		
 		try {
 			const configService = new ItemsService('fcm_config', { schema, accountability: { admin: true } });
@@ -22,9 +21,18 @@ export default defineHook(({ action }, { services }) => {
 			const targetRecipients = Array.isArray(recipient) ? recipient : [recipient];
 			const tRes = await tService.readByQuery({ filter: { user: { _in: targetRecipients } } });
 			const tokens = tRes.map((t: any) => t.token);
-			console.log(`FCM Hook: Sending to ${tokens.length} tokens for user ${recipient}`);
 			
 			if (tokens.length === 0) return;
+
+			// Determine the tag based on settings
+			let tag: string | undefined = undefined;
+			if (config.group_notifications) {
+				if (config.group_by_collection && collection) {
+					tag = collection;
+				} else {
+					tag = config.notification_tag || 'directus-notif';
+				}
+			}
 
 			const fcmUrl = `https://fcm.googleapis.com/v1/projects/${sa.project_id}/messages:send`;
 			for (const fcmToken of tokens) {
@@ -34,11 +42,10 @@ export default defineHook(({ action }, { services }) => {
 					body: JSON.stringify({ 
 						message: { 
 							token: fcmToken, 
-							// We move the content to 'data' and OMIT 'notification' 
-							// to prevent the browser/OS from double-showing it.
 							data: { 
 								title: subject || 'New Notification', 
-								body: message || 'You have a new message' 
+								body: message || 'You have a new message',
+								tag: tag // Will be undefined if grouping is disabled
 							} 
 						} 
 					}),
