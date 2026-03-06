@@ -1,0 +1,46 @@
+{
+	"name": "directus-extension-fcm-notify",
+	"description": "FCM Notifications Extension for Directus",
+	"icon": "extension",
+	"version": "1.0.0",
+	"type": "module",
+	"files": [
+		"dist"
+	],
+	"license": "MIT",
+	"directus:extension": {
+		"type": "bundle",
+		"path": {
+			"app": "dist/app.js",
+			"api": "dist/api.js"
+		},
+		"entries": [
+			{
+				"type": "endpoint",
+				"name": "fcm",
+				"source": "src/fcm-endpoint/index.ts"
+			},
+			{
+				"type": "hook",
+				"name": "fcm-hook",
+				"source": "src/fcm-hook/index.ts"
+			},
+			{
+				"type": "panel",
+				"name": "fcm-panel",
+				"source": "src/fcm-panel/index.ts"
+			}
+		],
+		"host": "^10.10.0"
+	},
+	"scripts": {
+		"build": "directus-extension build --no-minify",
+		"dev": "directus-extension build -w --no-minify"
+	},
+	"devDependencies": {
+		"@directus/extensions-sdk": "17.0.10",
+		"typescript": "^5.0.0",
+		"firebase": "^12.10.0",
+		"google-auth-library": "^9.15.0"
+	}
+}
