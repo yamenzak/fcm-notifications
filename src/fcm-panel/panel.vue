@@ -9,23 +9,34 @@
 		</div>
 
 		<div v-else-if="!status && !error">
-			<v-icon name="notifications" size="large" class="panel-icon" :class="{ active: subscribed }" />
-			<h3>{{ subscribed ? 'Notifications Enabled' : 'Push Notifications' }}</h3>
-			<p>{{ subscribed ? 'You are receiving notifications on this device.' : 'Stay updated with real-time notifications.' }}</p>
-			
-			<v-button v-if="!subscribed" @click="requestPermission" :loading="loading" kind="primary">
-				Enable Notifications
-			</v-button>
-			
-			<v-button v-else @click="unsubscribe" :loading="loading" kind="secondary" secondary>
-				Disable on this Device
-			</v-button>
+			<!-- Case 1: iOS but not added to Home Screen -->
+			<div v-if="isIOS && !isStandalone" class="ios-prompt">
+				<v-icon name="ios_share" size="large" class="panel-icon warning" />
+				<h3>Action Required</h3>
+				<p>To enable notifications on iPhone, tap the <strong>Share</strong> button and select <strong>"Add to Home Screen"</strong>.</p>
+				<v-info type="warning" icon="info">iOS only supports notifications when saved as an App.</v-info>
+			</div>
+
+			<!-- Case 2: Standard Flow -->
+			<div v-else>
+				<v-icon name="notifications" size="large" class="panel-icon" :class="{ active: subscribed }" />
+				<h3>{{ subscribed ? 'Notifications Enabled' : 'Push Notifications' }}</h3>
+				<p>{{ subscribed ? 'You are receiving notifications on this device.' : 'Stay updated with real-time notifications.' }}</p>
+				
+				<v-button v-if="!subscribed" @click="requestPermission" :loading="loading" kind="primary">
+					Enable Notifications
+				</v-button>
+				
+				<v-button v-else @click="unsubscribe" :loading="loading" kind="secondary" secondary>
+					Disable on this Device
+				</v-button>
+			</div>
 		</div>
 	</div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, computed } from 'vue';
 import { useApi } from '@directus/extensions-sdk';
 import { initializeApp, getApp, getApps, FirebaseApp } from 'firebase/app';
 import { getMessaging, getToken, deleteToken, Messaging } from 'firebase/messaging';
@@ -43,6 +54,22 @@ const status = ref('');
 const error = ref('');
 let currentToken = '';
 
+// OS Detection Logic
+const isIOS = computed(() => {
+	return [
+		'iPad Simulator',
+		'iPhone Simulator',
+		'iPod Simulator',
+		'iPad',
+		'iPhone',
+		'iPod'
+	].includes(navigator.platform) || (navigator.userAgent.includes("Mac") && "ontouchend" in document);
+});
+
+const isStandalone = computed(() => {
+	return (window.navigator as any).standalone || window.matchMedia('(display-mode: standalone)').matches;
+});
+
 const getFirebase = async (): Promise<{ app: FirebaseApp; vapidKey: string }> => {
 	const res = await api.get('/items/fcm_config');
 	const config = res.data.data as FCMConfig;
@@ -53,6 +80,12 @@ const getFirebase = async (): Promise<{ app: FirebaseApp; vapidKey: string }> =>
 
 const checkSubscription = async () => {
 	try {
+		// Only run cleanup and checks if the environment supports it
+		if (isIOS.value && !isStandalone.value) {
+			checking.value = false;
+			return;
+		}
+
 		const registrations = await navigator.serviceWorker.getRegistrations();
 		for (let reg of registrations) {
 			if (reg.scope.includes('/fcm/') && !reg.active?.scriptURL.includes('d1r3ctu5fcm.js')) {
@@ -60,13 +93,17 @@ const checkSubscription = async () => {
 			}
 		}
 
-		if (Notification.permission !== 'granted') {
+		if (typeof Notification === 'undefined' || Notification.permission !== 'granted') {
 			subscribed.value = false;
+			checking.value = false;
 			return;
 		}
 
 		const registration = await navigator.serviceWorker.getRegistration('/fcm/');
-		if (!registration) return;
+		if (!registration) {
+			checking.value = false;
+			return;
+		}
 
 		const { app, vapidKey } = await getFirebase();
 		const messaging: Messaging = getMessaging(app);
@@ -83,8 +120,8 @@ const checkSubscription = async () => {
 			});
 			subscribed.value = res.data.data.length > 0;
 		}
-	} catch (error) {
-		// Silent check fail is acceptable on load
+	} catch (err) {
+		// Silent fail on load
 	} finally {
 		checking.value = false;
 	}
@@ -96,6 +133,10 @@ const requestPermission = async () => {
 	try {
 		const { app, vapidKey } = await getFirebase();
 		const messaging: Messaging = getMessaging(app);
+
+		if (typeof Notification === 'undefined') {
+			throw new Error('Notifications are not supported on this browser.');
+		}
 
 		const permission = await Notification.requestPermission();
 		if (permission !== 'granted') throw new Error('Permission denied.');
@@ -150,6 +191,7 @@ const unsubscribe = async () => {
 		status.value = 'Unsubscribed successfully.';
 		setTimeout(() => status.value = '', 3000);
 	} catch (err: any) {
+		console.error('Unsubscribe Error:', err);
 		error.value = 'Failed to unsubscribe.';
 		setTimeout(() => error.value = '', 5000);
 	} finally {
@@ -174,8 +216,10 @@ onMounted(() => {
 }
 .panel-icon { margin-bottom: 16px; color: var(--foreground-subdued); transition: color 0.3s ease; }
 .panel-icon.active { color: var(--primary); }
+.panel-icon.warning { color: var(--warning); }
 .mb-4 { margin-bottom: 16px; }
 .checking { color: var(--foreground-subdued); }
 h3 { margin-bottom: 8px; }
 p { margin-bottom: 24px; color: var(--foreground-subdued); max-width: 300px; }
+.ios-prompt strong { color: var(--foreground-normal); }
 </style>
