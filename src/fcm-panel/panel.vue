@@ -27,8 +27,13 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { useApi } from '@directus/extensions-sdk';
-import { initializeApp, getApp, getApps } from 'firebase/app';
-import { getMessaging, getToken, deleteToken } from 'firebase/messaging';
+import { initializeApp, getApp, getApps, FirebaseApp } from 'firebase/app';
+import { getMessaging, getToken, deleteToken, Messaging } from 'firebase/messaging';
+
+interface FCMConfig {
+	firebase_config: any;
+	vapid_key: string;
+}
 
 const api = useApi();
 const loading = ref(false);
@@ -38,21 +43,19 @@ const status = ref('');
 const error = ref('');
 let currentToken = '';
 
-const getFirebase = async () => {
+const getFirebase = async (): Promise<{ app: FirebaseApp; vapidKey: string }> => {
 	const res = await api.get('/items/fcm_config');
-	const config = res.data.data;
+	const config = res.data.data as FCMConfig;
 	if (!config?.firebase_config) throw new Error('Firebase configuration missing.');
 	const app = !getApps().length ? initializeApp(config.firebase_config) : getApp();
-	return { firebase: app, vapidKey: config.vapid_key };
+	return { app, vapidKey: config.vapid_key };
 };
 
 const checkSubscription = async () => {
 	try {
-		// Clean up ghost workers from old versions on every load
 		const registrations = await navigator.serviceWorker.getRegistrations();
 		for (let reg of registrations) {
 			if (reg.scope.includes('/fcm/') && !reg.active?.scriptURL.includes('d1r3ctu5fcm.js')) {
-				console.log('FCM: Cleaning up legacy worker:', reg.active?.scriptURL);
 				await reg.unregister();
 			}
 		}
@@ -65,8 +68,8 @@ const checkSubscription = async () => {
 		const registration = await navigator.serviceWorker.getRegistration('/fcm/');
 		if (!registration) return;
 
-		const { firebase, vapidKey } = await getFirebase();
-		const messaging = getMessaging(firebase);
+		const { app, vapidKey } = await getFirebase();
+		const messaging: Messaging = getMessaging(app);
 		
 		const token = await getToken(messaging, { 
 			vapidKey, 
@@ -80,8 +83,8 @@ const checkSubscription = async () => {
 			});
 			subscribed.value = res.data.data.length > 0;
 		}
-	} catch (e) {
-		console.warn('FCM Check Error:', e);
+	} catch (error) {
+		// Silent check fail is acceptable on load
 	} finally {
 		checking.value = false;
 	}
@@ -91,8 +94,8 @@ const requestPermission = async () => {
 	loading.value = true;
 	error.value = '';
 	try {
-		const { firebase, vapidKey } = await getFirebase();
-		const messaging = getMessaging(firebase);
+		const { app, vapidKey } = await getFirebase();
+		const messaging: Messaging = getMessaging(app);
 
 		const permission = await Notification.requestPermission();
 		if (permission !== 'granted') throw new Error('Permission denied.');
@@ -125,8 +128,8 @@ const requestPermission = async () => {
 const unsubscribe = async () => {
 	loading.value = true;
 	try {
-		const { firebase } = await getFirebase();
-		const messaging = getMessaging(firebase);
+		const { app } = await getFirebase();
+		const messaging: Messaging = getMessaging(app);
 		
 		const searchRes = await api.get('/items/fcm_tokens', {
 			params: { filter: { token: { _eq: currentToken } }, fields: ['id'] }
@@ -147,7 +150,6 @@ const unsubscribe = async () => {
 		status.value = 'Unsubscribed successfully.';
 		setTimeout(() => status.value = '', 3000);
 	} catch (err: any) {
-		console.error('Unsubscribe Error:', err);
 		error.value = 'Failed to unsubscribe.';
 		setTimeout(() => error.value = '', 5000);
 	} finally {

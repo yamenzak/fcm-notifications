@@ -3,22 +3,22 @@ import { GoogleAuth } from 'google-auth-library';
 
 export default defineOperationApi({
 	id: 'fcm-broadcast',
-	handler: async ({ recipient, subject, message }, { services, schema }) => {
+	handler: async ({ recipient, subject, message }, { services, schema }: any) => {
 		const { ItemsService } = services;
 		try {
-			const configService = new ItemsService('fcm_config', { schema, accountability: { admin: true } });
+			const configService = new ItemsService('fcm_config', { schema, accountability: { admin: true } as any });
 			const config = await configService.readSingleton({});
-			const sa = config?.service_account;
+			const sa: any = (config as any)?.service_account;
 			if (!sa?.project_id) throw new Error('Service account missing.');
 
 			const auth = new GoogleAuth({ credentials: sa, scopes: 'https://www.googleapis.com/auth/firebase.messaging' });
 			const client = await auth.getClient();
 			const token = await client.getAccessToken();
 
-			const tService = new ItemsService('fcm_tokens', { schema, accountability: { admin: true } });
+			const tService = new ItemsService('fcm_tokens', { schema, accountability: { admin: true } as any });
 			const targetRecipients = Array.isArray(recipient) ? recipient : [recipient];
 			const tRes = await tService.readByQuery({ filter: { user: { _in: targetRecipients } } });
-			const tokens = tRes.map((t: any) => t.token);
+			const tokens = (tRes as any[]).map((t: any) => t.token);
 			
 			if (tokens.length === 0) return { success: true, sent: 0 };
 
@@ -34,8 +34,8 @@ export default defineOperationApi({
 				if (res.ok) successCount++;
 			}
 			return { success: true, sent: successCount };
-		} catch (e: any) {
-			return { success: false, error: e.message };
+		} catch (error: any) {
+			return { success: false, error: error.message };
 		}
 	},
 });
