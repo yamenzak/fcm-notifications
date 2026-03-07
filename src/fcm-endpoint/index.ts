@@ -10,7 +10,6 @@ interface FCMConfig {
 	group_by_collection?: boolean;
 }
 
-let isSetup = false;
 let cachedFirebaseCode = '';
 
 async function getFirebaseCode(): Promise<string> {
@@ -36,43 +35,12 @@ async function getImageAsBase64(url: string | undefined): Promise<string> {
 	} catch (error) { return 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'; }
 }
 
-async function runSetup(services: any, schema: any): Promise<void> {
-	if (isSetup) return;
-	const { CollectionsService, FieldsService, RelationsService } = services;
-	const cs = new CollectionsService({ schema, accountability: { admin: true } as any });
-	const fs = new FieldsService({ schema, accountability: { admin: true } as any });
-	const rs = new RelationsService({ schema, accountability: { admin: true } as any });
-	try {
-		await cs.readOne('fcm_config').catch(async () => {
-			await cs.createOne({ collection: 'fcm_config', singleton: true, meta: { icon: 'notifications_active', display_name: 'FCM Settings' }, schema: {} });
-		});
-		const ensureField = async (col: string, field: string, payload: any) => {
-			try { await fs.readOne(col, field); } catch (e) { await fs.createField(col, { field, ...payload }); }
-		};
-		await ensureField('fcm_config', 'firebase_config', { type: 'json', meta: { interface: 'input-code', options: { language: 'json' } } });
-		await ensureField('fcm_config', 'service_account', { type: 'json', meta: { interface: 'input-code', options: { language: 'json' } } });
-		await ensureField('fcm_config', 'vapid_key', { type: 'string', meta: { interface: 'input' } });
-		await ensureField('fcm_config', 'notification_icon', { type: 'string', meta: { interface: 'input' } });
-		await ensureField('fcm_config', 'notification_tag', { type: 'string', meta: { interface: 'input' } });
-		await ensureField('fcm_config', 'group_notifications', { type: 'boolean', meta: { interface: 'boolean', width: 'half' }, schema: { default_value: true } });
-		await ensureField('fcm_config', 'group_by_collection', { type: 'boolean', meta: { interface: 'boolean', width: 'half' }, schema: { default_value: true } });
-		await ensureField('fcm_tokens', 'user', { type: 'uuid', meta: { interface: 'select-dropdown-m2o' }, schema: { foreign_key_table: 'directus_users', foreign_key_column: 'id' } });
-		await ensureField('fcm_tokens', 'token', { type: 'string', meta: { interface: 'input' } });
-		await ensureField('fcm_tokens', 'device_name', { type: 'string', meta: { interface: 'input' } });
-		try { await rs.readOne('fcm_tokens', 'user'); } catch (e) {
-			await rs.createOne({ collection: 'fcm_tokens', field: 'user', related_collection: 'directus_users', schema: { foreign_key_table: 'directus_users', foreign_key_column: 'id' } });
-		}
-		isSetup = true;
-	} catch (e) {}
-}
-
 export default defineEndpoint((router, { services, exceptions }: any) => {
 	const { ItemsService } = services;
 	
 	// NEW: Safe Config Fetcher (Public parts only)
 	router.get('/config', async (req: any, res, next) => {
 		try {
-			await runSetup(services, req.schema);
 			const configService = new ItemsService('fcm_config', { schema: req.schema, accountability: { admin: true } as any });
 			const config = await configService.readSingleton({}) as FCMConfig;
 			return res.json({
