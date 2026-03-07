@@ -78,7 +78,40 @@ export default defineEndpoint((router, { services, exceptions }: any) => {
 			const config = await configService.readSingleton({}) as FCMConfig;
 			const firebaseLibCode = await getFirebaseCode();
 			const icon = await getImageAsBase64(config.notification_icon);
-			const swCode = `${firebaseLibCode}\nfirebase.initializeApp(${JSON.stringify(config.firebase_config)});const messaging = firebase.messaging();messaging.onBackgroundMessage((p) => { const title = p.data?.title || 'New Notification'; const options = { body: p.data?.body || 'You have a message', icon: '${icon}', tag: p.data?.tag || 'directus-notif', renotify: true }; self.registration.showNotification(title, options); });`;
+			const swCode = `${firebaseLibCode}
+firebase.initializeApp(${JSON.stringify(config.firebase_config)});
+const messaging = firebase.messaging();
+messaging.onBackgroundMessage((p) => {
+	const title = p.data?.title || 'New Notification';
+	const actions = [];
+	if (p.data?.url || (p.data?.collection && p.data?.item)) {
+		actions.push({ action: 'view', title: 'View' });
+	}
+	actions.push({ action: 'dismiss', title: 'Dismiss' });
+	const options = {
+		body: p.data?.body || 'You have a message',
+		icon: '${icon}',
+		tag: p.data?.tag || 'directus-notif',
+		renotify: true,
+		data: { url: p.data?.url, collection: p.data?.collection, item: p.data?.item },
+		actions: actions
+	};
+	self.registration.showNotification(title, options);
+});
+self.addEventListener('notificationclick', (event) => {
+	event.notification.close();
+	if (event.action === 'dismiss') return;
+	const d = event.notification.data;
+	let targetUrl;
+	if (d?.url) {
+		targetUrl = d.url;
+	} else if (d?.collection && d?.item) {
+		targetUrl = self.location.origin + '/admin/content/' + d.collection + '/' + d.item;
+	} else {
+		targetUrl = self.location.origin + '/admin';
+	}
+	event.waitUntil(clients.openWindow(targetUrl));
+});`;
 			res.setHeader('Content-Type', 'application/javascript');
 			res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
 			return res.send(swCode);

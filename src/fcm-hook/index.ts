@@ -15,7 +15,7 @@ export default defineHook(({ action }, { services, logger }) => {
 	moveMigrationScripts(logger);
 
 	action('notifications.create', async (p: any, { schema }: any) => {
-		const { recipient, subject, message, collection } = p.payload;
+		const { recipient, subject, message, collection, item } = p.payload;
 
 		try {
 			const configService = new ItemsService('fcm_config', { schema, accountability: { admin: true } as any });
@@ -46,6 +46,18 @@ export default defineHook(({ action }, { services, logger }) => {
 				}
 			}
 
+			// Extract first URL from message (supports markdown links and plain URLs)
+			let url = '';
+			if (message) {
+				const mdMatch = message.match(/\[.*?\]\((https?:\/\/[^\s)]+)\)/);
+				if (mdMatch) {
+					url = mdMatch[1];
+				} else {
+					const plainMatch = message.match(/(https?:\/\/[^\s]+)/);
+					if (plainMatch) url = plainMatch[1];
+				}
+			}
+
 			const fcmUrl = `https://fcm.googleapis.com/v1/projects/${sa.project_id}/messages:send`;
 			for (const fcmToken of tokens) {
 				fetch(fcmUrl, {
@@ -60,7 +72,10 @@ export default defineHook(({ action }, { services, logger }) => {
 							data: {
 								title: subject || 'New Notification',
 								body: message || 'You have a new message',
-								tag: tag
+								tag: tag,
+								url: url,
+								collection: collection || '',
+								item: item ? String(item) : ''
 							}
 						}
 					}),
