@@ -17,7 +17,7 @@ export async function up(knex) {
 	if (!(await knex.schema.hasTable('fcm_tokens'))) {
 		await knex.schema.createTable('fcm_tokens', (table) => {
 			table.increments('id').unsigned().notNullable().primary();
-			table.specificType('user', 'char(36)').nullable();
+			table.uuid('user').nullable();
 			table.string('token', 255).nullable();
 			table.string('device_name', 255).nullable();
 
