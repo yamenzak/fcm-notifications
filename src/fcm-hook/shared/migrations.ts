@@ -1,10 +1,13 @@
 import { execSync } from 'child_process';
+import { fileURLToPath } from 'url';
 import path from 'node:path';
 
 export function moveMigrationScripts(logger: any) {
 	const ROOT = process.cwd();
+	const currentFile = fileURLToPath(import.meta.url);
+	const currentDir = path.dirname(currentFile);
 
-	let migrationSrcPath: string[] | string = __dirname.split('/');
+	let migrationSrcPath: string[] | string = currentDir.split('/');
 	migrationSrcPath.pop();
 	migrationSrcPath.push('migrations');
 	migrationSrcPath = path.join('/', ...migrationSrcPath);
