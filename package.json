@@ -10,7 +10,8 @@
 	],
 	"type": "module",
 	"files": [
-		"dist"
+		"dist",
+		"migrations"
 	],
 	"license": "MIT",
 	"directus:extension": {
